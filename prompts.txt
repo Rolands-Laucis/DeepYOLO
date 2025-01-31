@@ -1,0 +1,42 @@
+using the pytorch library TemporalFusionTransformer model and an input of the last 14 days, 8 weeks and 6 months of stock market candle OCHL data along with precalculated 50_EMA,Stoch_RSI,Stoch_RSI_D,MACD,MACD_Signal,MACD_Hist,SAR,SuperTrend technical indicators and a cyclical time representation, create a model in python that predicts the next 7 1-day OCHL candles, but not the time or indicators. It should just rely on these past data points regardless of ticker or sentiment.
+Samples from the dataset csvs, where each file is a unique ticker sorted by incrementing date:
+days:
+Date,Open,High,Low,Close,50_MA,Stoch_RSI,Stoch_RSI_D,MACD,MACD_Signal,MACD_Hist,SAR,SuperTrend,Day_sin
+3,1368.692993,1407.517944,1361.213989,1406.370972,,,,,,,,0.0,0.06880242680231986
+4,1407.828979,1433.780029,1398.322998,1409.682007,,,,,,,,,0.08596479873744647
+5,1406.036011,1463.954956,1400.253052,1463.942017,,,,,,,1398.322998,,0.10310169744743485
+weeks:
+Date,Open,High,Low,Close,Week_sin,50_MA,Stoch_RSI,Stoch_RSI_D,MACD,MACD_Signal,MACD_Hist,SAR,SuperTrend
+6,1368.692993,1522.824951,1361.213989,1516.604004,0.120536680255323,,,,,,,,0.0
+13,1531.712036,1547.708008,1401.706055,1408.848022,0.2393156642875577,,,,,,,,
+20,1436.887939,1476.456055,1421.641968,1465.084961,0.3546048870425356,,,,,,,,
+months:
+Date,Open,High,Low,Close,Month_sin,50_MA,Stoch_RSI,Stoch_RSI_D,MACD,MACD_Signal,MACD_Hist,SAR,SuperTrend
+30,1368.692993,1547.708008,1361.213989,1534.996948,0.4999999999999999,,,,,,,,0.0
+59,1591.444946,1770.880005,1583.582031,1714.578003,0.8660254037844386,,,,,,,1361.213989,
+90,1720.597046,1811.062988,1596.072021,1800.224976,1.0,,,,,,,1361.213989,
+
+The csvs dont have actual date strings, but offsets from the date 2000-01-01 in days, weeks and months in their respective csvs. Its only used for alignment between time scales, such that if the current date is the n-th day, then the weeks data should find the lowest value that is above that offset and get the last weeks before that. Same for the last months.
+Also the csvs are organized by ticker in their filename, but that should be irrelevant, as the model should predict purely by the candles at multiple timescales and their indicators regardless of the ticker. So its not advised to merge the files, as you'd get duplicate date offset rows.
+
+
+With an input of the last 14 days, 8 weeks and 6 months of stock market candle OCHL data along with precalculated 50_EMA,Stoch_RSI,Stoch_RSI_D,MACD,MACD_Signal,MACD_Hist,SAR,SuperTrend technical indicators and a cyclical time representation, create an LSTM model in python that predicts the next 7 1-day OCHL candles, but not the time or indicators. It should just rely on these past data points regardless of ticker or sentiment.
+The csvs are organized as paths ./data/indicators/[scale]/[unique_ticker_enum]_[unique_ticker_symbol].csv .Samples from the dataset csvs, where each file is sorted by incrementing date offset:
+days csvs:
+Date,Open,High,Low,Close,50_MA,Stoch_RSI,Stoch_RSI_D,MACD,MACD_Signal,MACD_Hist,SAR,SuperTrend,Day_sin
+3,1368.692993,1407.517944,1361.213989,1406.370972,,,,,,,,0.0,0.06880242680231986
+4,1407.828979,1433.780029,1398.322998,1409.682007,,,,,,,,,0.08596479873744647
+5,1406.036011,1463.954956,1400.253052,1463.942017,,,,,,,1398.322998,,0.10310169744743485
+weeks csvs:
+Date,Open,High,Low,Close,Week_sin,50_MA,Stoch_RSI,Stoch_RSI_D,MACD,MACD_Signal,MACD_Hist,SAR,SuperTrend
+6,1368.692993,1522.824951,1361.213989,1516.604004,0.120536680255323,,,,,,,,0.0
+13,1531.712036,1547.708008,1401.706055,1408.848022,0.2393156642875577,,,,,,,,
+20,1436.887939,1476.456055,1421.641968,1465.084961,0.3546048870425356,,,,,,,,
+months csvs:
+Date,Open,High,Low,Close,Month_sin,50_MA,Stoch_RSI,Stoch_RSI_D,MACD,MACD_Signal,MACD_Hist,SAR,SuperTrend
+30,1368.692993,1547.708008,1361.213989,1534.996948,0.4999999999999999,,,,,,,,0.0
+59,1591.444946,1770.880005,1583.582031,1714.578003,0.8660254037844386,,,,,,,1361.213989,
+90,1720.597046,1811.062988,1596.072021,1800.224976,1.0,,,,,,,1361.213989,
+
+The csvs dont have actual date strings, but offsets from the date 2000-01-01 in days, weeks and months in their respective csvs. Its only used for alignment between time scales, such that if the current date is the n-th day, then the weeks data should find the lowest value that is above that offset and get the last weeks before that. Same for the last months.
+Also the csvs are organized by ticker in their filename, but that should be irrelevant, as the model should predict purely by the candles at multiple timescales and their indicators regardless of the ticker. So its not advised to merge the files, as you'd get duplicate date offset rows.
