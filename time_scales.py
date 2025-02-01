@@ -42,7 +42,7 @@ for i, file in enumerate(csvs):
     
     # Convert the date column to a cyclical year 1-51 week representation
     weeks['Week'] = weeks['Date'].dt.isocalendar().week
-    weeks['Week_sin'] = np.sin(2 * np.pi * weeks['Week'] / 52)
+    weeks['Date_sin'] = np.sin(2 * np.pi * weeks['Week'] / 52)
     weeks['Date'] = (weeks['Date'] - timestamp_2000).dt.days
     weeks.drop(columns=['Week'], inplace=True)
     # df.drop(columns=['Date'], inplace=True)
@@ -62,7 +62,7 @@ for i, file in enumerate(csvs):
     
     # Convert the date column to a cyclical year 1-12 month representation
     months['Month'] = months['Date'].dt.month
-    months['Month_sin'] = np.sin(2 * np.pi * months['Month'] / 12)
+    months['Date_sin'] = np.sin(2 * np.pi * months['Month'] / 12)
     months['Date'] = (months['Date'] - timestamp_2000).dt.days
     months.drop(columns=['Month'], inplace=True)
     # months.drop(columns=['Date'], inplace=True)

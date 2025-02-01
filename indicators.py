@@ -52,10 +52,11 @@ for j, time_scale in enumerate(scales):
                 # Convert the date column to a cyclical year 1-364 day representation
                 df['Date'] = pd.to_datetime(df['Date'])
                 df['Day'] = df['Date'].dt.dayofyear
-                df['Day_sin'] = np.sin(2 * np.pi * df['Day'] / 365)
+                df['Date_sin'] = np.sin(2 * np.pi * df['Day'] / 365)
                 df['Date'] = (df['Date'] - timestamp_2000).dt.days
                 df.drop(columns=['Day'], inplace=True)
 
+            df = df[['Date', 'Date_sin', 'Open', 'High', 'Low', 'Close', '50_EMA', 'Stoch_RSI', 'Stoch_RSI_D', 'MACD', 'MACD_Signal', 'MACD_Hist', 'SAR', 'SuperTrend']]
             df.to_csv(f'./data/indicators/{time_scale}/{file_id}', index=False)
             processed_files[time_scale].add(file_id)
         except Exception as e: pass
