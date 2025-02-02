@@ -18,6 +18,9 @@ parser = argparse.ArgumentParser(description='Process some args.')
 parser.add_argument('--model', type=str, default='', help='Path to previous model to resume training.')
 parser.add_argument('--full', type=bool, default=False, help='full mode')
 parser.add_argument('--csvs_per_run', type=int, help='how many csvs to process per run')
+parser.add_argument('--rnn', type=str, choices=['lstm', 'gru'], help='type of the rnn layer')
+parser.add_argument('--units', type=int, help='units in the rnn layer')
+parser.add_argument('--epochs', type=int, help='epochs')
 args = parser.parse_args()
 
 # read cli args - if a json file path is passed, load the config from it
@@ -30,12 +33,18 @@ if args.full:
     config['full_run'] = args.full
 if args.csvs_per_run:
     config['csvs_per_run'] = args.csvs_per_run
+if args.rnn:
+    config['rnn_type'] = args.rnn
+if args.units:
+    config['rnn_units'] = args.units
+if args.epochs:
+    config['epochs'] = args.epochs
 
 # Configuration
 lookback_days = config.get('lookback_days', 21)
 lookback_weeks = config.get('lookback_weeks', 8)
-lookback_months = config.get('lookback_months', 6)
-prediction_days = config.get('prediction_days', 3)
+# lookback_months = config.get('lookback_months', 6)
+prediction_days = config.get('prediction_days', 5)
 full_run = config.get('full_run', False)
 feature_count = config.get('feature_count', 13)
 csvs_per_run = config.get('csvs_per_run', 5)
@@ -53,7 +62,7 @@ csv_paths = glob.glob('./data/indicators/days/*.csv')
 if not full_run: csv_paths = csv_paths[:10]
 csvs_total_len = len(csv_paths)
 csvs_start = config.get('run_csvs_end', 0) #start where the last run ended
-# csvs_end = min(csvs_start + csvs_per_run, csvs_total_len - 1)
+print('Total CSVS to be processed by all runs:', csvs_total_len)
 for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
     # Prepare datasets
     X_daily, X_weekly, X_monthly, y = [], [], [], []
@@ -67,23 +76,24 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
     print('Loading csv datasets...')
     for i, days_path in enumerate(run_csv_paths):
         # add progress print out
-        print(f'\n{round((i/run_csv_count)*100)}% csvs {i}/{run_csv_count}\n', end='\r')
+        if i % 100 == 0:
+            print(f'\n{round((i/run_csv_count)*100)}% csvs {i}/{run_csv_count}\n', end='\r')
 
         ticker_prefix = os.path.basename(days_path).split('.csv')[0]
         weeks_path = f'./data/indicators/weeks/{ticker_prefix}.csv'
-        months_path = f'./data/indicators/months/{ticker_prefix}.csv'
+        # months_path = f'./data/indicators/months/{ticker_prefix}.csv'
         # print(ticker_prefix, days_path, weeks_path, months_path)
         
         daily_df = pd.read_csv(days_path, index_col=None, dtype=dtypes, engine='c', low_memory=True).fillna(0)
         weekly_df = pd.read_csv(weeks_path, index_col=None, dtype=dtypes, engine='c', low_memory=True).fillna(0)
-        monthly_df = pd.read_csv(months_path, index_col=None, dtype=dtypes, engine='c', low_memory=True).fillna(0)
+        # monthly_df = pd.read_csv(months_path, index_col=None, dtype=dtypes, engine='c', low_memory=True).fillna(0)
         
         # get a table of week dates and their row indexes
         weekly_dates = weekly_df['Date'].values.astype(int)
-        monthly_dates = monthly_df['Date'].values.astype(int)
+        # monthly_dates = monthly_df['Date'].values.astype(int)
 
         max_day = len(daily_df)-prediction_days-lookback_days #offset from the end of the rows such that there is still enough day data points for both lookahead
-        for first_day in range(0, max_day, lookback_days): #first day is actually the first row and we look forward to the current day + look ahead days for prediction
+        for first_day in range(0, max_day, lookback_days // 8): #first day is actually the first row and we look forward to the current day + look ahead days for prediction
             current_day = first_day + lookback_days
             last_pred_day = current_day + prediction_days
             # print(first_day, current_day, last_pred_day)
@@ -113,23 +123,23 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
 
             # Monthly data
             # in monthly_dates find the highest date number that is closest to current_day number
-            month_idx = bisect.bisect_right(monthly_dates, current_day)
-            # from monthly_df select the rows from month_idx-lookback_months+1 to month_idx
-            months = monthly_df.iloc[max(0, month_idx-lookback_months):month_idx, 1:].values
-            # if any of the indicators isnt ready, then skip
-            if np.any(months == 0) or np.any(np.isnan(months)):
-                continue
-            # if months.shape[0] < lookback_months then left pad with int16 zeros
-            if months.shape[0] < lookback_months:
-                pad = np.zeros((lookback_months-months.shape[0], feature_count), dtype=np.int16)
-                months = np.vstack((pad, months))
+            # month_idx = bisect.bisect_right(monthly_dates, current_day)
+            # # from monthly_df select the rows from month_idx-lookback_months+1 to month_idx
+            # months = monthly_df.iloc[max(0, month_idx-lookback_months):month_idx, 1:].values
+            # # if any of the indicators isnt ready, then skip
+            # # if np.any(months == 0) or np.any(np.isnan(months)):
+            # #     continue
+            # # if months.shape[0] < lookback_months then left pad with int16 zeros
+            # if months.shape[0] < lookback_months:
+            #     pad = np.zeros((lookback_months-months.shape[0], feature_count), dtype=np.int16)
+            #     months = np.vstack((pad, months))
             # print('months', month_idx, months.shape)
 
             prediction_day_candles = daily_df.iloc[current_day+1:current_day+prediction_days+1][['Open', 'Close', 'High', 'Low']].values
             
             X_daily.append(days)
             X_weekly.append(weeks)
-            X_monthly.append(months)
+            # X_monthly.append(months)
             y.append(prediction_day_candles)
 
             # add progress print out
@@ -138,16 +148,17 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
 
     X_daily = np.array(X_daily)
     X_weekly = np.array(X_weekly)
-    X_monthly = np.array(X_monthly)
+    # X_monthly = np.array(X_monthly)
     y = np.array(y)
     shapes = {
         'X_daily': X_daily.shape,
         'X_weekly': X_weekly.shape,
-        'X_monthly': X_monthly.shape,
+        # 'X_monthly': X_monthly.shape,
         'y': y.shape
     }
     # pprint(shapes)
-    del run_csv_count, weekly_dates, monthly_dates, daily_df, weekly_df, monthly_df, days, weeks, months, prediction_day_candles
+    del run_csv_count, weekly_dates, daily_df, weekly_df, days, weeks, prediction_day_candles
+    # del monthly_dates, monthly_df, months
 
     # # Train-test split
     print('Splitting data into train and test sets...')
@@ -155,8 +166,9 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
     from sklearn.model_selection import train_test_split
     (X_daily_train, X_daily_test, 
     X_weekly_train, X_weekly_test, 
-    X_monthly_train, X_monthly_test, 
-    y_train, y_test) = train_test_split(X_daily, X_weekly, X_monthly, y, test_size=test_size)
+    # X_monthly_train, X_monthly_test, 
+    # y_train, y_test) = train_test_split(X_daily, X_weekly, X_monthly, y, test_size=test_size)
+    y_train, y_test) = train_test_split(X_daily, X_weekly, y, test_size=test_size)
 
     # print config
     config = config | {
@@ -170,7 +182,7 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
         'run_csvs': len(run_csv_paths),
         'lookback_days': lookback_days,
         'lookback_weeks': lookback_weeks,
-        'lookback_months': lookback_months,
+        # 'lookback_months': lookback_months,
         'prediction_days': prediction_days,
         'full_run': full_run,
         'feature_count': feature_count,
@@ -182,7 +194,8 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
     pprint(config)
 
     # cleanup
-    del X_daily, X_weekly, X_monthly, y, shapes, run_csv_paths, test_size
+    del X_daily, X_weekly, y, shapes, run_csv_paths, test_size
+    del X_monthly
 
     # make and train model
     if config.get('model_path'):
@@ -195,35 +208,38 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
         # Model architecture
         daily_input = Input(shape=(lookback_days, feature_count)) #the input the LSTM will receive a squence of 21 days, each a vector of 13 features
         weekly_input = Input(shape=(lookback_weeks, feature_count))
-        monthly_input = Input(shape=(lookback_months, feature_count))
+        # monthly_input = Input(shape=(lookback_months, feature_count))
 
-        rnn_type = 'LSTM' # 'GRU' or 'LSTM'
-        rnn_units = 128 if full_run else 32
+        rnn_type = config.get('rnn_type', 'lstm')
+        rnn_units = config.get('rnn_units', 128) if full_run else 32
 
-        if rnn_type == 'GRU':
+        if rnn_type == 'gru':
             daily = GRU(rnn_units)(daily_input)
             weekly = GRU(rnn_units)(weekly_input)
-            monthly = GRU(rnn_units)(monthly_input)
-        elif rnn_type == 'LSTM':
+            # monthly = GRU(rnn_units)(monthly_input)
+        elif rnn_type == 'lstm':
             daily = LSTM(rnn_units, return_sequences=False)(daily_input) #in a loop of 21 times (bcs of day sequence length) the LSTM will output a single vector of 128 features to pass back to itself with the next day
             weekly = LSTM(rnn_units, return_sequences=False)(weekly_input)
-            monthly = LSTM(rnn_units, return_sequences=False)(monthly_input)
+            # monthly = LSTM(rnn_units, return_sequences=False)(monthly_input)
         else:
             raise ValueError('rnn_type must be GRU or LSTM')
 
-        layer = Concatenate()([daily, weekly, monthly])
+        layer = Concatenate()([daily, weekly]) #, monthly
         if full_run:
             layer = Dense(rnn_units, activation='relu')(layer)
+        #     layer = Dense(rnn_units // 2, activation='relu')(layer)
+        # if rnn_units > 64:
         layer = Dense(32, activation='relu')(layer)
         layer = Dense(prediction_days * 4)(layer)
         layer = Reshape((prediction_days, 4))(layer)
 
         # https://keras.io/api/metrics/classification_metrics/#f1score-class
-        model = Model(inputs=[daily_input, weekly_input, monthly_input], outputs=layer)
+        model = Model(inputs=[daily_input, weekly_input], outputs=layer) #, monthly_input
         model.compile(optimizer=Adam(0.001), loss='mse', metrics=['accuracy']) #, 'f1_score'
         
         # cleanup
-        del daily_input, weekly_input, monthly_input, daily, weekly, monthly, layer
+        del daily_input, weekly_input, daily, weekly, layer
+        # del monthly_input, monthly
 
         print('Model built.')
 
@@ -231,22 +247,26 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
 
     # Train model
     print('Starting train...')
-    epochs = 10 if full_run else 1
+    epochs = config.get('epochs', 20) if full_run else 1
     batch_size = 32
     model.fit(
-        [X_daily_train, X_weekly_train, X_monthly_train],
+        # [X_daily_train, X_weekly_train, X_monthly_train],
+        [X_daily_train, X_weekly_train],
         y_train,
-        validation_data=([X_daily_test, X_weekly_test, X_monthly_test], y_test),
+        # validation_data=([X_daily_test, X_weekly_test, X_monthly_test], y_test),
+        validation_data=([X_daily_test, X_weekly_test], y_test),
         epochs=epochs,
         batch_size=batch_size
     )
 
     # Evaluate model
-    metrics = model.evaluate([X_daily_test, X_weekly_test, X_monthly_test], y_test)
+    # metrics = model.evaluate([X_daily_test, X_weekly_test, X_monthly_test], y_test)
+    metrics = model.evaluate([X_daily_test, X_weekly_test], y_test)
     print(f'Test metrics: {metrics}')
 
     # Predict and calculate additional metrics
-    y_pred = model.predict([X_daily_test, X_weekly_test, X_monthly_test])
+    # y_pred = model.predict([X_daily_test, X_weekly_test, X_monthly_test])
+    y_pred = model.predict([X_daily_test, X_weekly_test])
 
     # Reshape predictions and true values to 2D arrays for metric calculations
     y_pred_flat = y_pred.reshape(-1, 4)
@@ -259,7 +279,8 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
     print(f'Mean Absolute Error: {mae}')
     print(f'Root Mean Squared Error: {rmse}')
 
-    del X_daily_train, X_daily_test, X_weekly_train, X_weekly_test, X_monthly_train, X_monthly_test, y_train, y_test
+    del X_daily_train, X_daily_test, X_weekly_train, X_weekly_test, y_train, y_test
+    # del X_monthly_train, X_monthly_test
 
     # Save the config and model summary to a JSON file
     print('Saving model...')
@@ -286,10 +307,10 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
         layer_info[layer_name] = {"type": layer_type, "units": units}
 
     config['model_summary'] = layer_info
-    rnn_type = 'LSTM' if 'lstm' in layer_info else 'GRU'
-    rnn_units = layer_info['lstm']['units'] if rnn_type == 'LSTM' else layer_info['gru']['units']
+    rnn_type = 'lstm' if 'lstm' in layer_info else 'gru'
+    rnn_units = layer_info['lstm']['units'] if rnn_type == 'lstm' else layer_info['gru']['units']
 
-    path = f'./models/{rnn_type}_loss{round(config["metrics"]["loss"], 3)}_a{round(config["metrics"]["accuracy"], 3)}_rmse{round(rmse, 3)}_u{rnn_units}_e{epochs}_d{lookback_days}_w{lookback_weeks}_m{lookback_months}_c{prediction_days}'
+    path = f'./models/{rnn_type}_loss{round(config["metrics"]["loss"], 3)}_a{round(config["metrics"]["accuracy"], 3)}_rmse{round(rmse, 3)}_u{rnn_units}_e{epochs}_csvs{csvs_per_run}_d{lookback_days}_w{lookback_weeks}_c{prediction_days}' #_m{lookback_months}
     model_path = f'{path}.keras'
     config['model_path'] = model_path
     with open(f'{path}.json', 'w') as f:

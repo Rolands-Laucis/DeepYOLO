@@ -26,17 +26,19 @@ print("Running indicators.py...")
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description='Process some integers.')
-parser.add_argument('--csvs', type=int, default=100, help='End number for the glob index filter')
+parser.add_argument('--csvs', type=int, help='End number for the glob index filter')
 args = parser.parse_args()
 
 timestamp_2000 = pd.Timestamp('2000-01-01')
-scales = ['days', 'weeks', 'months']
+scales = ['days', 'weeks'] #, 'months'
 processed_files = {scale: set() for scale in scales}
 
 for j, time_scale in enumerate(scales):
-    csvs = glob(f'data/{time_scale}/*.csv')[:args.csvs]
+    csvs = glob(f'data/{time_scale}/*.csv')
+    if args.csvs:
+        csvs = csvs[:args.csvs]
     count = len(csvs)
-    print(f"Processing {time_scale}... {count} csvs")
+    print(f"\nProcessing {time_scale}... {count} csvs")
     for i, csv in enumerate(csvs):
         file_id = os.path.basename(csv)
         if j > 0 and file_id not in processed_files[scales[j-1]]:
@@ -69,7 +71,7 @@ for j, time_scale in enumerate(scales):
         except Exception as e: pass
 
         if i % 10 == 0:
-            print(f"Processed {round(((i+1)/count) * 100) }%")
+            print(f"Processed {round(((i+1)/count) * 100, 3) }%", end='\r')
 
         # break
     # exit(0)

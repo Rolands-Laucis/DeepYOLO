@@ -1,8 +1,14 @@
 import pandas as pd
 from glob import glob
 import os
+import argparse
 
 print("Running clean.py...")
+
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description='Process some integers.')
+parser.add_argument('--csvs', type=int, help='End number for the glob index filter')
+args = parser.parse_args()
 
 # example data/Market.csv
     # Index,Date,Open,High,Low,Close,Adj Close,Volume
@@ -77,8 +83,11 @@ columns_mapping_stock_csv = {
 }
 
 # market_file = 'data/Market.csv'
-stock_files_txt = glob('data/Stocks/*.us.txt')[:500]
-stock_files_csv = glob('data/Stocks/*.csv')[:500]
+stock_files_txt = glob('data/Stocks/*.us.txt')
+stock_files_csv = glob('data/Stocks/*.csv')
+if args.csvs:
+    stock_files_txt = glob('data/Stocks/*.us.txt')[:min(args.csvs, len(stock_files_txt))]
+    stock_files_csv = glob('data/Stocks/*.csv')[:min(args.csvs, len(stock_files_csv))]
 
 # filter out filenames that start with a number
 stock_files_txt = [file for file in stock_files_txt if not os.path.basename(file).split('.')[0][0].isdigit()]
