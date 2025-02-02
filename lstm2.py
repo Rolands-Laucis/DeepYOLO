@@ -110,7 +110,7 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
             # in weekly_dates find the highest date number that is closest to current_day number
             week_idx = bisect.bisect_right(weekly_dates, current_day)
             # from weekly_df select the rows from week_idx-lookback_weeks+1 to week_idx
-            weeks = weekly_df.iloc[max(0, week_idx-lookback_weeks):week_idx, 1:].values
+            weeks = weekly_df.iloc[max(0, week_idx-lookback_weeks):week_idx, 1:].values # remove the date column
             # if any of the indicators isnt ready, then skip
             if np.any(weeks == 0) or np.any(np.isnan(weeks)):
                 continue
