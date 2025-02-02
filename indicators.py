@@ -20,15 +20,21 @@ import pandas as pd
 from glob import glob
 import os
 import numpy as np
+import argparse
 
 print("Running indicators.py...")
+
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description='Process some integers.')
+parser.add_argument('--csvs', type=int, default=100, help='End number for the glob index filter')
+args = parser.parse_args()
 
 timestamp_2000 = pd.Timestamp('2000-01-01')
 scales = ['days', 'weeks', 'months']
 processed_files = {scale: set() for scale in scales}
 
 for j, time_scale in enumerate(scales):
-    csvs = glob(f'data/{time_scale}/*.csv')[:100]
+    csvs = glob(f'data/{time_scale}/*.csv')[:args.csvs]
     count = len(csvs)
     print(f"Processing {time_scale}... {count} csvs")
     for i, csv in enumerate(csvs):
@@ -38,13 +44,14 @@ for j, time_scale in enumerate(scales):
 
         df = pd.read_csv(csv)
         try:
-            df['50_EMA'] = ta.ema(df['Close'], length=50)
+            df['28_EMA'] = ta.ema(df['Close'], length=28)
             stoch_rsi = ta.stochrsi(df['Close'], length=14)
             df['Stoch_RSI'] = stoch_rsi['STOCHRSIk_14_14_3_3']
             df['Stoch_RSI_D'] = stoch_rsi['STOCHRSId_14_14_3_3']
-            df['MACD'] = ta.macd(df['Close'])['MACD_12_26_9']
-            df['MACD_Signal'] = ta.macd(df['Close'])['MACDs_12_26_9']
-            df['MACD_Hist'] = ta.macd(df['Close'])['MACDh_12_26_9']
+            macd = ta.macd(df['Close'])
+            df['MACD'] = macd['MACD_12_26_9']
+            df['MACD_Signal'] = macd['MACDs_12_26_9']
+            df['MACD_Hist'] = macd['MACDh_12_26_9']
             df['SAR'] = ta.psar(df['High'], df['Low'], df['Close'])['PSARl_0.02_0.2']
             df['SuperTrend'] = ta.supertrend(df['High'], df['Low'], df['Close'])['SUPERT_7_3.0']
 
@@ -56,7 +63,7 @@ for j, time_scale in enumerate(scales):
                 df['Date'] = (df['Date'] - timestamp_2000).dt.days
                 df.drop(columns=['Day'], inplace=True)
 
-            df = df[['Date', 'Date_sin', 'Open', 'High', 'Low', 'Close', '50_EMA', 'Stoch_RSI', 'Stoch_RSI_D', 'MACD', 'MACD_Signal', 'MACD_Hist', 'SAR', 'SuperTrend']]
+            df = df[['Date', 'Date_sin', 'Open', 'High', 'Low', 'Close', '28_EMA', 'Stoch_RSI', 'Stoch_RSI_D', 'MACD', 'MACD_Signal', 'MACD_Hist', 'SAR', 'SuperTrend']]
             df.to_csv(f'./data/indicators/{time_scale}/{file_id}', index=False)
             processed_files[time_scale].add(file_id)
         except Exception as e: pass
