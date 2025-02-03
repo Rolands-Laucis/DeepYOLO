@@ -87,5 +87,12 @@ with open('resp.json', 'r') as j:
     x = proc(d)
     # print(x)
 
+    m = Model('models\\gru_loss122.637_a0.723_rmse11.074_u128_e20_csvs11466_d21_w8_c5.keras')
+    print('gru')
+    print(m.pred(x))
     m = Model('models\\gru_loss43.736_a0.674_rmse6.613_u128_e10_csvs4000_d21_w8_c5.keras')
+    print('gru yesterday')
+    print(m.pred(x))
+    m = Model('models\\lstm_loss62.973_a0.714_rmse7.936_u128_e20_csvs11466_d21_w8_c5.keras')
+    print('lstm')
     print(m.pred(x))

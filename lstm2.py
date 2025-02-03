@@ -13,14 +13,24 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.models import load_model
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
+def str_to_bool(value):
+    if isinstance(value, bool):
+        return value
+    if value.lower() in ('false', '0', 'no', 'off'):
+        return False
+    return True  # Any other value (including being supplied without an argument) is treated as True
+
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description='Process some args.')
 parser.add_argument('--model', type=str, default='', help='Path to previous model to resume training.')
 parser.add_argument('--full', type=bool, default=False, help='full mode')
+parser.add_argument('--save', nargs='?', const=True, default=True, type=str_to_bool, help='Save model (default: True, explicitly use "false" to disable)')
+parser.add_argument('--norm', action='store_true', help='normalize candles')
+parser.add_argument('--csvs', type=int, default=-1, help='how many csvs to process')
 parser.add_argument('--csvs_per_run', type=int, help='how many csvs to process per run')
 parser.add_argument('--rnn', type=str, choices=['lstm', 'gru'], help='type of the rnn layer')
 parser.add_argument('--units', type=int, help='units in the rnn layer')
-parser.add_argument('--epochs', type=int, help='epochs')
+parser.add_argument('--epochs', type=int, default=10, help='epochs')
 args = parser.parse_args()
 
 # read cli args - if a json file path is passed, load the config from it
@@ -37,8 +47,10 @@ if args.rnn:
     config['rnn_type'] = args.rnn
 if args.units:
     config['rnn_units'] = args.units
-if args.epochs:
-    config['epochs'] = args.epochs
+config['epochs'] = args.epochs
+config['save'] = args.save
+if args.norm:
+    config['norm'] = args.norm
 
 # Configuration
 lookback_days = config.get('lookback_days', 21)
@@ -48,6 +60,10 @@ prediction_days = config.get('prediction_days', 5)
 full_run = config.get('full_run', False)
 feature_count = config.get('feature_count', 13)
 csvs_per_run = config.get('csvs_per_run', 5)
+normalize = config.get('norm', False)
+pprint(config)
+print(normalize)
+exit(0)
 
 # constnats
 # https://stackoverflow.com/questions/29245848/what-are-all-the-dtypes-that-pandas-recognizes
@@ -56,9 +72,10 @@ assert len(columns) == 1+feature_count, len(columns) #+1 for 'Date', which is no
 dtypes = ['int16'] + [np.float32]*feature_count #date is int16, rest are float32, but pandas wont convert it for some reason
 dtypes = dict(zip(columns, dtypes))
 assert len(dtypes) == 1+feature_count, len(dtypes)
-
+col_order = ['Date_sin', 'Open', 'High', 'Low', 'Close', '28_EMA', 'Stoch_RSI', 'Stoch_RSI_D', 'MACD', 'MACD_Signal', 'MACD_Hist', 'SAR', 'SuperTrend']
 
 csv_paths = glob.glob('./data/indicators/days/*.csv')
+if args.csvs != 1: csv_paths = csv_paths[:args.csvs]
 if not full_run: csv_paths = csv_paths[:10]
 csvs_total_len = len(csv_paths)
 csvs_start = config.get('run_csvs_end', 0) #start where the last run ended
@@ -77,12 +94,11 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
     for i, days_path in enumerate(run_csv_paths):
         # add progress print out
         if i % 100 == 0:
-            print(f'\n{round((i/run_csv_count)*100)}% csvs {i}/{run_csv_count}\n', end='\r')
+            print(f'{round((i/run_csv_count)*100)}% csvs {i}/{run_csv_count}', end='\r')
 
         ticker_prefix = os.path.basename(days_path).split('.csv')[0]
         weeks_path = f'./data/indicators/weeks/{ticker_prefix}.csv'
         # months_path = f'./data/indicators/months/{ticker_prefix}.csv'
-        # print(ticker_prefix, days_path, weeks_path, months_path)
         
         daily_df = pd.read_csv(days_path, index_col=None, dtype=dtypes, engine='c', low_memory=True).fillna(0)
         weekly_df = pd.read_csv(weeks_path, index_col=None, dtype=dtypes, engine='c', low_memory=True).fillna(0)
@@ -93,10 +109,9 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
         # monthly_dates = monthly_df['Date'].values.astype(int)
 
         max_day = len(daily_df)-prediction_days-lookback_days #offset from the end of the rows such that there is still enough day data points for both lookahead
-        for first_day in range(0, max_day, lookback_days // 8): #first day is actually the first row and we look forward to the current day + look ahead days for prediction
+        for first_day in range(lookback_days, max_day, lookback_days // 8): #first day is actually the first row and we look forward to the current day + look ahead days for prediction
             current_day = first_day + lookback_days
             last_pred_day = current_day + prediction_days
-            # print(first_day, current_day, last_pred_day)
 
             # Daily sequence
             days = daily_df.iloc[first_day:current_day].values
@@ -104,7 +119,13 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
             if np.any(days == 0) or np.any(np.isnan(days)):
                 continue
             days = days[:,1:] # remove the date column
-            # print('days', days.shape, days.dtype)
+            # normalize the cols
+            target_cols = [0, 1, 2, 3]  # Indices of 'Open', 'Close', 'High', 'Low'
+            if normalize:
+                max_price = np.max(days[:, target_cols], axis=0) / 100
+                days[:, target_cols] /= max_price
+            # print(days[:5])
+            # exit(0)
 
             # Weekly data
             # in weekly_dates find the highest date number that is closest to current_day number
@@ -118,6 +139,11 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
             if weeks.shape[0] < lookback_weeks:
                 pad = np.zeros((lookback_weeks-weeks.shape[0], feature_count), dtype=np.float32)
                 weeks = np.vstack((pad, weeks))
+            # normalize the cols
+            if normalize:
+                weeks[:, target_cols] /= max_price
+            # print(weeks[:5])
+            # exit(0)
             # print('weeks', week_idx, weeks.shape, weeks.dtype)
             # exit(0)
 
@@ -136,6 +162,8 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
             # print('months', month_idx, months.shape)
 
             prediction_day_candles = daily_df.iloc[current_day+1:current_day+prediction_days+1][['Open', 'Close', 'High', 'Low']].values
+            if normalize:
+                prediction_day_candles[:, target_cols] /= max_price
             
             X_daily.append(days)
             X_weekly.append(weeks)
@@ -143,8 +171,8 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
             y.append(prediction_day_candles)
 
             # add progress print out
-            if first_day % 2000 == 0:
-                print(f'{first_day}/{max_day} rows {round((first_day/max_day)*100)}% ', end='\r')
+            # if first_day % 2000 == 0:
+            #     print(f'{first_day}/{max_day} rows {round((first_day/max_day)*100)}% ', end='\r')
 
     X_daily = np.array(X_daily)
     X_weekly = np.array(X_weekly)
@@ -185,6 +213,7 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
         # 'lookback_months': lookback_months,
         'prediction_days': prediction_days,
         'full_run': full_run,
+        'normalized': normalize,
         'feature_count': feature_count,
         'loaded samples': y.shape[0],
         'train samples': len(y_train),
@@ -283,44 +312,45 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
     # del X_monthly_train, X_monthly_test
 
     # Save the config and model summary to a JSON file
-    print('Saving model...')
-    config['metrics'] = {
-        'loss': metrics[0],
-        'accuracy': metrics[1],
-        'mae': mae,
-        'rmse': rmse
-    }
-    config['epochs'] = epochs
+    if config.get('save', True):
+        print('Saving model...')
+        config['metrics'] = {
+            'loss': metrics[0],
+            'accuracy': metrics[1],
+            'mae': mae,
+            'rmse': rmse
+        }
+        config['epochs'] = epochs
 
-    # Extract relevant model layer info
-    model_data = json.loads(model.to_json())
-    layer_info = {}
-    for layer in model_data["config"]["layers"]:
-        layer_type = layer["class_name"]
-        layer_name = layer["name"]
-        # Determine units if applicable
-        units = layer["config"].get("units")
-        if units is None:
-            # Try to extract shape for InputLayer
-            batch_shape = layer["config"].get("batch_shape")
-            units = batch_shape[1] if batch_shape else None  # Take second dimension if exists
-        layer_info[layer_name] = {"type": layer_type, "units": units}
+        # Extract relevant model layer info
+        model_data = json.loads(model.to_json())
+        layer_info = {}
+        for layer in model_data["config"]["layers"]:
+            layer_type = layer["class_name"]
+            layer_name = layer["name"]
+            # Determine units if applicable
+            units = layer["config"].get("units")
+            if units is None:
+                # Try to extract shape for InputLayer
+                batch_shape = layer["config"].get("batch_shape")
+                units = batch_shape[1] if batch_shape else None  # Take second dimension if exists
+            layer_info[layer_name] = {"type": layer_type, "units": units}
 
-    config['model_summary'] = layer_info
-    rnn_type = 'lstm' if 'lstm' in layer_info else 'gru'
-    rnn_units = layer_info['lstm']['units'] if rnn_type == 'lstm' else layer_info['gru']['units']
+        config['model_summary'] = layer_info
+        rnn_type = 'lstm' if 'lstm' in layer_info else 'gru'
+        rnn_units = layer_info['lstm']['units'] if rnn_type == 'lstm' else layer_info['gru']['units']
 
-    path = f'./models/{rnn_type}_loss{round(config["metrics"]["loss"], 3)}_a{round(config["metrics"]["accuracy"], 3)}_rmse{round(rmse, 3)}_u{rnn_units}_e{epochs}_csvs{csvs_per_run}_d{lookback_days}_w{lookback_weeks}_c{prediction_days}' #_m{lookback_months}
-    model_path = f'{path}.keras'
-    config['model_path'] = model_path
-    with open(f'{path}.json', 'w') as f:
-        json.dump(config, f, indent=2)
+        path = f'./models/{rnn_type}_loss{round(config["metrics"]["loss"], 3)}_a{round(config["metrics"]["accuracy"], 3)}_rmse{round(rmse, 3)}_u{rnn_units}_e{epochs}_csvs{csvs_total_len}_d{lookback_days}_w{lookback_weeks}_c{prediction_days}' + ('_norm' if normalize else '') #_m{lookback_months}
+        model_path = f'{path}.keras'
+        config['model_path'] = model_path
+        with open(f'{path}.json', 'w') as f:
+            json.dump(config, f, indent=2)
 
-    # Save the model
-    model.save(model_path)
+        # Save the model
+        model.save(model_path)
 
-    del model, path, model_path, rnn_type, rnn_units, layer_info, model_data
-    del mae, rmse, metrics, y_pred, y_pred_flat, y_test_flat
-    del epochs, batch_shape, batch_size
+        del model, rnn_type, rnn_units, layer_info, model_data
+        del mae, rmse, metrics, y_pred, y_pred_flat, y_test_flat
+        del epochs, batch_shape, batch_size
 
 input('Press any key to exit...')
