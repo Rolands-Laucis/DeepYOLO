@@ -61,9 +61,8 @@ full_run = config.get('full_run', False)
 feature_count = config.get('feature_count', 13)
 csvs_per_run = config.get('csvs_per_run', 5)
 normalize = config.get('norm', False)
-pprint(config)
-print(normalize)
-exit(0)
+# pprint(config)
+# exit(0)
 
 # constnats
 # https://stackoverflow.com/questions/29245848/what-are-all-the-dtypes-that-pandas-recognizes
