@@ -100,13 +100,18 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
         weeks_path = f'./data/indicators/weeks/{ticker_prefix}.csv'
         # months_path = f'./data/indicators/months/{ticker_prefix}.csv'
         
-        daily_df = pd.read_csv(days_path, index_col=None, dtype=dtypes, engine='c', low_memory=True).fillna(0)
+        daily_df = pd.read_csv(days_path, index_col=None, dtype=dtypes, engine='c', low_memory=True).fillna(0) # dtype=dtypes,
         weekly_df = pd.read_csv(weeks_path, index_col=None, dtype=dtypes, engine='c', low_memory=True).fillna(0)
         # monthly_df = pd.read_csv(months_path, index_col=None, dtype=dtypes, engine='c', low_memory=True).fillna(0)
+        # print(daily_df.head())
+        # print(weekly_df.head())
+        # exit(0)
         
         # get a table of week dates and their row indexes
         weekly_dates = weekly_df['Date'].values.astype(int)
         # monthly_dates = monthly_df['Date'].values.astype(int)
+
+        feature_count = 12
 
         max_day = len(daily_df)-prediction_days-lookback_days #offset from the end of the rows such that there is still enough day data points for both lookahead
         for first_day in range(lookback_days, max_day, lookback_days // 8): #first day is actually the first row and we look forward to the current day + look ahead days for prediction
@@ -118,7 +123,7 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
             # if any of the indicators isnt ready, then skip
             if np.any(days == 0) or np.any(np.isnan(days)):
                 continue
-            days = days[:,1:] # remove the date column
+            days = days[:,2:] # remove the date column
             # normalize the cols
             target_cols = [0, 1, 2, 3]  # Indices of 'Open', 'Close', 'High', 'Low'
             if normalize:
@@ -131,7 +136,7 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
             # in weekly_dates find the highest date number that is closest to current_day number
             week_idx = bisect.bisect_right(weekly_dates, current_day)
             # from weekly_df select the rows from week_idx-lookback_weeks+1 to week_idx
-            weeks = weekly_df.iloc[max(0, week_idx-lookback_weeks):week_idx, 1:].values # remove the date column
+            weeks = weekly_df.iloc[max(0, week_idx-lookback_weeks):week_idx, 2:].values # remove the date column
             # if any of the indicators isnt ready, then skip
             if np.any(weeks == 0) or np.any(np.isnan(weeks)):
                 continue

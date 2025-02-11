@@ -26,7 +26,7 @@ class Model:
         self.model.trainable = False  # Ensures the model is not accidentally retrained
 
         print('Loaded model:')
-        self.pp({key: self.config[key] for key in ['rnn_type', 'rnn_units', 'total_csvs', 'epochs', 'total_csvs', 'metrics']})
+        # self.pp({key: self.config[key] for key in ['rnn_type', 'rnn_units', 'total_csvs', 'epochs', 'total_csvs', 'metrics']})
 
     def pred(self, x=[]):
         print(f'{self.name} Predicting...')
@@ -78,7 +78,7 @@ class API:
     
 
 col_order = ['Date_sin', 'Open', 'High', 'Low', 'Close', '28_EMA', 'Stoch_RSI', 'Stoch_RSI_D', 'MACD', 'MACD_Signal', 'MACD_Hist', 'SAR', 'SuperTrend']
-def PrepData(api_obj:dict):
+def PrepData(api_obj:dict) -> list:
     global col_order
 
     df = pd.DataFrame(columns=['Date', 'Open', 'High', 'Low', 'Close'])
