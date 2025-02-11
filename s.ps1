@@ -1,2 +1,2 @@
 .\env.ps1
-python server.py
+python server.py $args
