@@ -43,6 +43,7 @@ for i, file in enumerate(csvs):
     # Convert the date column to a cyclical year 1-51 week representation
     weeks['Week'] = weeks['Date'].dt.isocalendar().week
     weeks['Date_sin'] = np.sin(2 * np.pi * weeks['Week'] / 52)
+    weeks['Date_cos'] = np.cos(2 * np.pi * weeks['Week'] / 52)
     weeks['Date'] = (weeks['Date'] - timestamp_2000).dt.days
     weeks.drop(columns=['Week'], inplace=True)
     # df.drop(columns=['Date'], inplace=True)
@@ -63,6 +64,7 @@ for i, file in enumerate(csvs):
     # Convert the date column to a cyclical year 1-12 month representation
     months['Month'] = months['Date'].dt.month
     months['Date_sin'] = np.sin(2 * np.pi * months['Month'] / 12)
+    months['Date_cos'] = np.cos(2 * np.pi * months['Month'] / 12)
     months['Date'] = (months['Date'] - timestamp_2000).dt.days
     months.drop(columns=['Month'], inplace=True)
     # months.drop(columns=['Date'], inplace=True)
@@ -71,5 +73,5 @@ for i, file in enumerate(csvs):
     months.to_csv(f'data/months/{os.path.basename(file)}', index=False)
     
     # break
-    if i % 10 == 0:
-        print(f"Processed {round(((i+1)/count) * 100) }%")
+    if i % 20 == 0:
+        print(f"Processed {round(((i+1)/count) * 100, 2) }%", end='\r')
