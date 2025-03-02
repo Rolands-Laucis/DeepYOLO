@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import pandas_ta as ta
 
+timestamp_2000 = pd.Timestamp('2000-01-01')
+
 class Model:
     def __init__(self, name:str=''):
         print('Importing model libs...')
@@ -28,8 +30,121 @@ class Model:
         print('Loaded model:')
         # self.pp({key: self.config[key] for key in ['rnn_type', 'rnn_units', 'total_csvs', 'epochs', 'total_csvs', 'metrics']})
 
-    def pred(self, x=[]):
-        print(f'{self.name} Predicting...')
+    def PrepData(self, api_obj:dict) -> list:
+        cols = ['Date', 'Open', 'Close', 'High', 'Low']
+        df = pd.DataFrame(columns=cols)
+        k = list(api_obj.keys())
+        for i in range(len(k)):
+            df.loc[len(df)] = [k[i], api_obj[k[i]]['1. open'], api_obj[k[i]]['4. close'], api_obj[k[i]]['2. high'], api_obj[k[i]]['3. low']]
+        df['Date'] = pd.to_datetime(df['Date'])
+        df.columns = cols
+        df['Open'] = df['Open'].astype(np.float32)
+        df['High'] = df['High'].astype(np.float32)
+        df['Low'] = df['Low'].astype(np.float32)
+        df['Close'] = df['Close'].astype(np.float32)
+        # print(df.head())
+
+        # indicators
+        df.sort_values(['Date'], ascending=True, inplace=True)
+        df['EMA'] = ta.ema(df['Close'], length=21)
+
+        stoch_rsi = ta.stochrsi(df['Close'])
+        df['Stoch_RSI'] = stoch_rsi.iloc[:, 0]
+        df['Stoch_RSI_D'] = stoch_rsi.iloc[:, 1]
+
+        macd = ta.macd(df['Close'])#.dropna()
+        df['MACD'] = macd.iloc[:, 0]
+        df['MACD_Signal'] = macd.iloc[:, 2]
+
+        df['SAR'] = ta.psar(df['High'], df['Low'], df['Close'])['PSARl_0.02_0.2']
+        df['SuperTrend'] = ta.supertrend(df['High'], df['Low'], df['Close'])['SUPERT_7_3.0']
+
+        ## Overbought/Oversold Indicators
+        bb = ta.bbands(df['Close'], length=2) # Bollinger Bands
+        df['BOLL_Low'] = bb.iloc[:, 0]
+        df['BOLL_High'] = bb.iloc[:, 2]
+
+        ## Energy Indicators
+        df['PSL'] = ta.psl(df['Close'])  # Psychological Line (default length = 12)
+        df['MASS'] = ta.massi(df['High'], df['Low'])  # Mass Index (default settings)
+
+        ## Volatility Indicators
+        df['NATR'] = ta.natr(df['High'], df['Low'], df['Close'])  # Normalized ATR
+
+        ## Momentum Indicators
+        df['ROC'] = ta.roc(df['Close'])  # Rate of Change
+        df['WILLR'] = ta.willr(df['High'], df['Low'], df['Close'])  # Williams %R
+
+        dmi = ta.adx(df['High'], df['Low'], df['Close']).dropna()
+        df['DMI_ADX'] = dmi.iloc[:, 0]
+        df['DMI_DI_P'] = dmi.iloc[:, 1]
+        df['DMI_DI_N'] = dmi.iloc[:, 2]
+
+        # Convert the date column to a cyclical year 1-364 day representation
+        df['Day'] = df['Date'].dt.dayofyear
+        df['Date_sin'] = np.sin(2 * np.pi * df['Day'] / 365)
+        df['Date_cos'] = np.cos(2 * np.pi * df['Day'] / 365)
+        df.drop(columns=['Day'], inplace=True)
+        df.sort_values(['Date'], ascending=False, inplace=True)
+        # print(df.head())
+        # print(df.shape)
+        # exit(0)
+        
+        feats = set(df.columns) - set(['Date', 'Date_sin', 'Date_cos', 'Open', 'Close', 'High', 'Low'])
+        feat_dict = dict(map(lambda f: (f, 'mean'), feats))
+        df.set_index('Date', inplace=True)  # Ensure DateTimeIndex
+        weeks = df.iloc[:self.config['lookback_weeks']*7].copy()
+        weeks = weeks.resample('W-FRI').agg({
+            'Open': 'first',
+            'High': 'max',
+            'Low': 'min',
+            'Close': 'last'
+        } | feat_dict).reset_index()
+        weeks.sort_values(['Date'], ascending=False, inplace=True)
+        weeks.reset_index(inplace=True)
+        weeks['Week'] = weeks['Date'].dt.isocalendar().week
+        weeks['Date_sin'] = np.sin(2 * np.pi * weeks['Week'] / 52)
+        weeks['Date_cos'] = np.cos(2 * np.pi * weeks['Week'] / 52)
+        weeks.drop(['Week', 'Date', 'index'], axis=1, inplace=True)
+        weeks = weeks[self.config['columns']]
+        weeks = weeks.iloc[:self.config['lookback_weeks']]
+        weeks = weeks.fillna(0).astype('float32')
+        # print(weeks.head())
+        # print(weeks.shape, type(weeks))
+        # exit(0)
+
+        # Resample to monthly frequency, considering business days
+        months = df.iloc[:self.config['lookback_months']*31].copy()
+        months = months.resample('ME').agg({
+            'Open': 'first',
+            'High': 'max',
+            'Low': 'min',
+            'Close': 'last'
+        } | feat_dict).dropna()
+        months.reset_index(inplace=True)
+        
+        # Convert the date column to a cyclical year 1-12 month representation
+        months['Month'] = months['Date'].dt.month
+        months['Date_sin'] = np.sin(2 * np.pi * months['Month'] / 12)
+        months['Date_cos'] = np.cos(2 * np.pi * months['Month'] / 12)
+        months.drop(columns=['Month'], inplace=True)
+        months = months.iloc[:self.config['lookback_months']]
+        months = months[self.config['columns']]
+        months = months.fillna(0).astype('float32')
+        # print(months.head())
+        # print(months.shape)
+        # exit(0)
+        
+        df = df[:self.config['lookback_days']]
+        df = df[self.config['columns']]
+        df = df.fillna(0).astype('float32')
+        df = df.values.reshape((1, self.config['lookback_days'], len(self.config['columns'])))
+        weeks = weeks.values.reshape((1, self.config['lookback_weeks'], len(self.config['columns'])))
+        months = months.values.reshape((1, self.config['lookback_months'], len(self.config['columns'])))
+        return [df, weeks, months]
+
+    def pred(self, x=[], ticker:str=''):
+        print(f'{self.name} predicting {ticker}...')
         return self.model.predict(x)[0]
 
 class API:
@@ -77,80 +192,4 @@ class API:
         return r
     
 
-col_order = ['Date_sin', 'Open', 'High', 'Low', 'Close', '28_EMA', 'Stoch_RSI', 'Stoch_RSI_D', 'MACD', 'MACD_Signal', 'MACD_Hist', 'SAR', 'SuperTrend']
-def PrepData(api_obj:dict) -> list:
-    global col_order
-
-    df = pd.DataFrame(columns=['Date', 'Open', 'High', 'Low', 'Close'])
-    k = list(api_obj.keys())
-    for i in range(len(k)):
-        df.loc[len(df)] = [k[i], api_obj[k[i]]['1. open'], api_obj[k[i]]['2. high'], api_obj[k[i]]['3. low'], api_obj[k[i]]['4. close']]
-    df['Date'] = pd.to_datetime(df['Date'])
-    df.columns = ['Date', 'Open', 'High', 'Low', 'Close']
-    df['Open'] = df['Open'].astype(np.float32)
-    df['High'] = df['High'].astype(np.float32)
-    df['Low'] = df['Low'].astype(np.float32)
-    df['Close'] = df['Close'].astype(np.float32)
-    # df.set_index(['Date'], inplace=True)
-    print(df.head())
-
-    # indicators
-    df.sort_values(['Date'], ascending=True, inplace=True)
-    df['28_EMA'] = ta.ema(df['Close'], length=28)
-    stoch_rsi = ta.stochrsi(df['Close'], length=14)
-    if stoch_rsi is None:
-        print(df.head())
-    df['Stoch_RSI'] = stoch_rsi['STOCHRSIk_14_14_3_3']
-    df['Stoch_RSI_D'] = stoch_rsi['STOCHRSId_14_14_3_3']
-    macd = ta.macd(df['Close'])
-    df['MACD'] = macd['MACD_12_26_9']
-    df['MACD_Signal'] = macd['MACDs_12_26_9']
-    df['MACD_Hist'] = macd['MACDh_12_26_9']
-    df['SAR'] = ta.psar(df['High'], df['Low'], df['Close'])['PSARl_0.02_0.2']
-    df['SuperTrend'] = ta.supertrend(df['High'], df['Low'], df['Close'])['SUPERT_7_3.0']
-    df.sort_values(['Date'], ascending=False, inplace=True)
-    # print(df.head())
-
-    # time scales
-    days = df.copy().iloc[:21]
-    days['Date'] = days['Date'].dt.dayofyear
-    days['Date_sin'] = np.sin(2 * np.pi * days['Date'] / 365)
-    days.drop('Date', axis=1, inplace=True)
-    days = days[col_order]
-    days = days.fillna(0).astype('float32')
-    # print(days.head())
-    # print(days.shape)
-    # exit(0)
-
-    df.set_index('Date', inplace=True)
-    weeks = df.iloc[:8*7]
-    # print(weeks.dtypes, weeks.columns)
-    weeks = weeks.resample('W-FRI').agg({
-        'Open': 'first',
-        'High': 'max',
-        'Low': 'min',
-        'Close': 'last', 
-        '28_EMA':'mean', 
-        'Stoch_RSI':'mean', 
-        'Stoch_RSI_D':'mean', 
-        'MACD':'mean', 
-        'MACD_Signal':'mean', 
-        'MACD_Hist':'mean', 
-        'SAR':'mean', 
-        'SuperTrend':'mean'
-    }).reset_index()
-    weeks.sort_values(['Date'], ascending=False, inplace=True)
-    weeks.reset_index(inplace=True)
-    weeks['Week'] = weeks['Date'].dt.isocalendar().week
-    weeks['Date_sin'] = np.sin(2 * np.pi * weeks['Week'] / 52)
-    weeks.drop(['Week', 'Date', 'index'], axis=1, inplace=True)
-    weeks = weeks[col_order]
-    weeks = weeks.iloc[:8]
-    weeks = weeks.fillna(0).astype('float32')
-    # print(weeks.head())
-    # print(weeks.shape)
-    
-    days = days.values.reshape((1, 21, 13)) #np.array([1, ])
-    weeks = weeks.values.reshape((1, 8, 13)) #np.array([1, ])
-    # weeks = np.array([1, weeks.values])
-    return [days, weeks]
+# col_order = ['Date_sin', 'Open', 'High', 'Low', 'Close', '28_EMA', 'Stoch_RSI', 'Stoch_RSI_D', 'MACD', 'MACD_Signal', 'MACD_Hist', 'SAR', 'SuperTrend']
