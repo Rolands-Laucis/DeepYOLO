@@ -5,6 +5,7 @@ import numpy as np
 from pprint import pprint
 import json
 import argparse
+import math
 
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Reshape, GRU
@@ -59,8 +60,8 @@ if args.norm:
     config['norm'] = args.norm
 
 # Configuration
-lookback_days = config.get('lookback_days', 40)
-prediction_days = config.get('prediction_days', 5)
+lookback_days = config.get('lookback_days', 50)
+prediction_days = config.get('prediction_days', 3)
 full_run = config.get('full_run', False)
 feature_count = config.get('feature_count', 23)
 csvs_per_run = config.get('csvs_per_run', 5)
@@ -71,13 +72,14 @@ pred_cols = config.get('pred_cols', ['High', 'Low'])
 
 # CSV PATHS
 csv_paths = glob.glob('./data/indicators/days/*.csv')
-if args.csvs != 1: csv_paths = csv_paths[:args.csvs]
+if args.csvs != -1: csv_paths = csv_paths[:args.csvs]
 elif not full_run: csv_paths = csv_paths[:9]
 csvs_total_len = len(csv_paths)
 csvs_start = config.get('run_csvs_end', 0) #start where the last run ended
 print('Total CSVS to be processed by all runs:', csvs_total_len)
+# exit(0)
 
-# constnats
+# constants
 # https://stackoverflow.com/questions/29245848/what-are-all-the-dtypes-that-pandas-recognizes
 df = pd.read_csv(csv_paths[0], engine='c', nrows=1, low_memory=False)
 columns = df.columns
@@ -98,7 +100,7 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
     run_csvs_end = min(run_csvs_start + csvs_per_run, csvs_total_len - 1)
     run_csv_paths = csv_paths[run_csvs_start:run_csvs_end]
     run_csv_count = len(run_csv_paths)
-    print(f'Processing {run_csv_count} csvs from {run_csvs_start} to {run_csvs_end-1} with increment of {csvs_per_run}...')
+    print(f'Processing {run_csv_count} csvs from {run_csvs_start} to {run_csvs_end-1} with increment of {csvs_per_run} from total {csvs_total_len}...')
     # exit(0)
 
     print('Loading csv datasets...')
@@ -107,15 +109,10 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
         if i % 100 == 0:
             print(f'{round((i/run_csv_count)*100)}% csvs {i}/{run_csv_count}', end='\r')
 
-        ticker_prefix = os.path.basename(days_path).split('.csv')[0]
-        
         daily_df = pd.read_csv(days_path, index_col=None, dtype=dtypes, engine='c', low_memory=True)#.fillna(0) # dtype=dtypes,
-        # print(daily_df.head())
-        # print(weekly_df.head())
-        # exit(0)
         
         max_day = len(daily_df)-prediction_days-lookback_days #offset from the end of the rows such that there is still enough day data points for both lookahead
-        for first_day in range(lookback_days, max_day, lookback_days): #first day is actually the first row and we look forward to the current day + look ahead days for prediction
+        for first_day in range(lookback_days, max_day, lookback_days // lookback_days): #first day is actually the first row and we look forward to the current day + look ahead days for prediction
             current_day = first_day + lookback_days
             last_pred_day = current_day + prediction_days
 
@@ -186,27 +183,32 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
         rnn_units = config.get('rnn_units', 64) if full_run else 16
 
         # Helper function to build a branch with a given number of recurrent layers.
-        def build_rnn_branch(input_tensor, num_layers, rnn_units, rnn_type='lstm'):
+        # Build RNN layers with decreasing units
+        def build_rnn_branch(input_tensor, num_layers, base_units, rnn_type='lstm'):
             x = input_tensor
+            current_units = base_units
             for i in range(num_layers):
-                # All layers except the last should return the full sequence.
                 return_sequences = (i < num_layers - 1)
+                layer_units = max(1, math.floor(current_units))  # Ensure at least 1 unit
                 if rnn_type.lower() == 'lstm':
-                    x = LSTM(rnn_units, return_sequences=return_sequences)(x)
+                    x = LSTM(layer_units, return_sequences=return_sequences)(x)
                 elif rnn_type.lower() == 'gru':
-                    x = GRU(rnn_units, return_sequences=return_sequences)(x)
+                    x = GRU(layer_units, return_sequences=return_sequences)(x)
                 else:
                     raise ValueError('rnn_type must be either "lstm" or "gru"')
-            return x
+                current_units /= 1.5  # Reduce units by 1.5x for the next layer
+            return x, math.floor(current_units * 1.5)  # Return last used layer's size
 
-        # Build a branch for each input using the helper function
-        layer = build_rnn_branch(daily_input, rnn_layers, rnn_units, rnn_type)
+        # Build the RNN branch
+        layer, last_lstm_units = build_rnn_branch(daily_input, rnn_layers, rnn_units, rnn_type)
 
+        # Add a smaller Dense layer after LSTM
         if full_run:
-            layer = Dense(rnn_units, activation='relu')(layer)
-        #     layer = Dense(rnn_units // 2, activation='relu')(layer)
+            # layer = Dense(rnn_units, activation='relu')(layer)
+            dense_units = max(1, last_lstm_units // 2)
+            layer = Dense(dense_units, activation='leaky_relu')(layer)
         if rnn_units > 64:
-            layer = Dense(64, activation='relu')(layer)
+            layer = Dense(64, activation='leaky_relu')(layer)
         layer = Dense(prediction_days * len(pred_cols))(layer)
         layer = Reshape((prediction_days, len(pred_cols)))(layer)
 

@@ -1,0 +1,1 @@
+python lstm3.py --full=True --csvs_per_run=5000 --rnn="lstm" --units=64 --epochs=10 > output.txt

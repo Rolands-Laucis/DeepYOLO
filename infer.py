@@ -150,6 +150,15 @@ class Model:
 class API:
     # alphavantage API documentation: https://www.alphavantage.co/documentation/
     api_base_url = "https://www.alphavantage.co/query"
+    commodity_syms = {
+        'OIL': 'WTI',
+        'WTI': 'WTI',
+        'GOLD': 'GOLD',
+        'BRENT': 'BRENT',
+        'NATGAS': 'NATURAL_GAS',
+        'SILVER': 'SILVER',
+        'COPPER': 'COPPER',
+    }
 
     def __init__(self):
         import requests
@@ -166,19 +175,24 @@ class API:
 
     def Request(self, sym:str, params:dict={}):
         print(f'Requesting {sym} ...')
-        url = self.api_base_url + self.QueryParams({
-            "symbol": sym,
+        if sym in self.commodity_syms:
+            params['function'] = self.commodity_syms[sym]
+            sym = ''
+        params = {
             "outputsize":"compact",
             "extended_hours": "False"
-        } | params | self.api_key_param)
+        } | params | self.api_key_param
+        if sym:
+            params["symbol"] = sym
+        url = self.api_base_url + self.QueryParams(params)
         r = self.requests.get(url)
-        print(f'HTTP {r.status_code} Got response')
+        print(f'HTTP {r.status_code}')
         if r.status_code != 200:
             raise ValueError('Request failed HTTP', r.status_code, r.text)
         j = r.json()
         err = j.get('Error Message', None)
         if err:
-            raise ValueError('Request error msg', r.status_code, err)
+            raise ValueError('Request error msg', r.status_code, r.reason,err)
         return j
 
     def RequestIntraday(self, sym:str='AAPL', interval='60min') -> dict:
@@ -190,6 +204,12 @@ class API:
         if not r:
             raise ValueError('Request response empty', r)
         return r
+    
+    # def RequestCommodity(self, func:str='OIL') -> dict:
+    #     if func in self.commodity_funcs:
+    #         func = self.commodity_funcs[func]
+    #     print(f'Requesting commodity {func} ...')
+    #     return self.Request('', {"function": func, "datatype": "json"})
     
 
 # col_order = ['Date_sin', 'Open', 'High', 'Low', 'Close', '28_EMA', 'Stoch_RSI', 'Stoch_RSI_D', 'MACD', 'MACD_Signal', 'MACD_Hist', 'SAR', 'SuperTrend']
