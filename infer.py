@@ -143,9 +143,83 @@ class Model:
         months = months.values.reshape((1, self.config['lookback_months'], len(self.config['columns'])))
         return [df, weeks, months]
 
-    def pred(self, x=[], ticker:str=''):
+    @staticmethod
+    def ParseAPIData(api_obj:dict) -> pd.DataFrame:
+        cols = ['Date', 'Open', 'Close', 'High', 'Low']
+        df = pd.DataFrame(columns=cols)
+        k = list(api_obj.keys())
+        for i in range(len(k)):
+            df.loc[len(df)] = [k[i], api_obj[k[i]]['1. open'], api_obj[k[i]]['4. close'], api_obj[k[i]]['2. high'], api_obj[k[i]]['3. low']]
+        df['Date'] = pd.to_datetime(df['Date'])
+        df.columns = cols
+        df['Open'] = df['Open'].astype(np.float32)
+        df['High'] = df['High'].astype(np.float32)
+        df['Low'] = df['Low'].astype(np.float32)
+        df['Close'] = df['Close'].astype(np.float32)
+        return df
+
+    def PrepDataDays(self, df:pd.DataFrame) -> list:
+        if type(df) == dict:
+            df = self.ParseAPIData(df)
+        # print(df.head())
+
+        # indicators
+        df.sort_values(['Date'], ascending=True, inplace=True)
+        df['EMA'] = ta.ema(df['Close'], length=21)
+
+        stoch_rsi = ta.stochrsi(df['Close'])
+        df['Stoch_RSI'] = stoch_rsi.iloc[:, 0]
+        df['Stoch_RSI_D'] = stoch_rsi.iloc[:, 1]
+
+        macd = ta.macd(df['Close'])#.dropna()
+        df['MACD'] = macd.iloc[:, 0]
+        df['MACD_Signal'] = macd.iloc[:, 2]
+
+        df['SAR'] = ta.psar(df['High'], df['Low'], df['Close'])['PSARl_0.02_0.2']
+        df['SuperTrend'] = ta.supertrend(df['High'], df['Low'], df['Close'])['SUPERT_7_3.0']
+
+        ## Overbought/Oversold Indicators
+        bb = ta.bbands(df['Close'], length=2) # Bollinger Bands
+        df['BOLL_Low'] = bb.iloc[:, 0]
+        df['BOLL_High'] = bb.iloc[:, 2]
+
+        ## Energy Indicators
+        df['PSL'] = ta.psl(df['Close'])  # Psychological Line (default length = 12)
+        df['MASS'] = ta.massi(df['High'], df['Low'])  # Mass Index (default settings)
+
+        ## Volatility Indicators
+        df['NATR'] = ta.natr(df['High'], df['Low'], df['Close'])  # Normalized ATR
+
+        ## Momentum Indicators
+        df['ROC'] = ta.roc(df['Close'])  # Rate of Change
+        df['WILLR'] = ta.willr(df['High'], df['Low'], df['Close'])  # Williams %R
+
+        dmi = ta.adx(df['High'], df['Low'], df['Close']).dropna()
+        df['DMI_ADX'] = dmi.iloc[:, 0]
+        df['DMI_DI_P'] = dmi.iloc[:, 1]
+        df['DMI_DI_N'] = dmi.iloc[:, 2]
+
+        # Convert the date column to a cyclical year 1-364 day representation
+        df['Day'] = df['Date'].dt.dayofyear
+        df['Date_sin'] = np.sin(2 * np.pi * df['Day'] / 365)
+        df['Date_cos'] = np.cos(2 * np.pi * df['Day'] / 365)
+        df.drop(columns=['Day'], inplace=True)
+        df.sort_values(['Date'], ascending=False, inplace=True)
+        # print(df.head())
+        # print(df.shape)
+        # exit(0)
+        
+        df = df[:self.config['lookback_days']]
+        df = df[self.config['columns']]
+        df = df.fillna(0).astype('float32')
+        df = df.values.reshape((1, self.config['lookback_days'], len(self.config['columns'])))
+        return df
+
+    def pred(self, x=[], ticker:str='') -> pd.DataFrame:
         print(f'{self.name} predicting {ticker}...')
-        return self.model.predict(x)[0]
+        preds_df = pd.DataFrame(self.model.predict(x)[0])
+        preds_df.columns = self.config['pred_cols']
+        return preds_df
 
 class API:
     # alphavantage API documentation: https://www.alphavantage.co/documentation/
