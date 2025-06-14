@@ -1,18 +1,25 @@
 import glob
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 import pandas as pd
 import numpy as np
 from pprint import pprint
 import json
 import argparse
 import math
+from datetime import datetime
 
+print('Importing tensorflow libs...', flush=True)
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, LSTM, Dense, Concatenate, Reshape, GRU
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.models import load_model
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error
+import tensorflow.config.threading as threading
+threading.set_intra_op_parallelism_threads(16)  # e.g. number of CPU cores
+threading.set_inter_op_parallelism_threads(4)  # reasonable default
+print('Importing tensorflow done.', flush=True)
 
 def str_to_bool(value):
     if isinstance(value, bool):
@@ -35,6 +42,9 @@ parser.add_argument('--rnn_layers', type=int, help='rnn layer count that feed in
 parser.add_argument('--epochs', type=int, default=10, help='epochs')
 args = parser.parse_args()
 
+def dprint(*args, **kwargs):
+    print(f"[{datetime.now().isoformat()}]", *args, **kwargs)
+
 # read cli args - if a json file path is passed, load the config from it
 config = {}
 if args.model:
@@ -42,7 +52,7 @@ if args.model:
     if os.path.exists(args.model):
         with open(args.model, 'r') as f:
             config = json.load(f)
-            print('Loaded config from', args.model)
+            dprint('Loaded config from', args.model)
     else: raise ValueError(f'Provided [{args.model}] doesnt exist!')
 if args.full:
     config['full_run'] = args.full
@@ -60,13 +70,13 @@ if args.norm:
     config['norm'] = args.norm
 
 # Configuration
-lookback_days = config.get('lookback_days', 50)
-prediction_days = config.get('prediction_days', 3)
+lookback_days = config.get('lookback_days', 30)
+prediction_days = config.get('prediction_days', 5)
 full_run = config.get('full_run', False)
 feature_count = config.get('feature_count', 23)
 csvs_per_run = config.get('csvs_per_run', 5)
 normalize = config.get('norm', False)
-pred_cols = config.get('pred_cols', ['High', 'Low'])
+pred_cols = config.get('pred_cols', ['High', 'Low', 'Close'])
 # pprint(config)
 # exit(0)
 
@@ -76,7 +86,7 @@ if args.csvs != -1: csv_paths = csv_paths[:args.csvs]
 elif not full_run: csv_paths = csv_paths[:9]
 csvs_total_len = len(csv_paths)
 csvs_start = config.get('run_csvs_end', 0) #start where the last run ended
-print('Total CSVS to be processed by all runs:', csvs_total_len)
+dprint('Total CSVS to be processed by all runs:', csvs_total_len, flush=True)
 # exit(0)
 
 # constants
@@ -87,11 +97,12 @@ assert len(columns) == 1+feature_count, len(columns) #+1 for 'Date', which is no
 dtypes = ['int16'] + [np.float32]*feature_count #date is int16, rest are float32, but pandas wont convert it for some reason
 dtypes = dict(zip(columns, dtypes))
 assert len(dtypes) == 1+feature_count, len(dtypes)
-# print(df.head())
-# print(columns)
-# exit(0)
-config['columns'] = columns[1:] # the date col will be removed
+#dprint(df.head())
+#dprint(columns)
+config['columns'] = list(columns[1:]) # the date col will be removed
 del df, columns
+pprint(config)
+#exit(0)
 
 for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
     # Prepare datasets
@@ -100,16 +111,16 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
     run_csvs_end = min(run_csvs_start + csvs_per_run, csvs_total_len - 1)
     run_csv_paths = csv_paths[run_csvs_start:run_csvs_end]
     run_csv_count = len(run_csv_paths)
-    print(f'Processing {run_csv_count} csvs from {run_csvs_start} to {run_csvs_end-1} with increment of {csvs_per_run} from total {csvs_total_len}...')
+    dprint(f'Processing {run_csv_count} csvs from {run_csvs_start} to {run_csvs_end-1} with increment of {csvs_per_run} from total {csvs_total_len}...', flush=True)
     # exit(0)
 
-    print('Loading csv datasets...')
+    dprint('Loading csv datasets...', flush=True)
     for i, days_path in enumerate(run_csv_paths):
-        # add progress print out
+        # add progress dprint out
         if i % 100 == 0:
-            print(f'{round((i/run_csv_count)*100)}% csvs {i}/{run_csv_count}', end='\r')
+            dprint(f'{round((i/run_csv_count)*100)}% csvs {i}/{run_csv_count}', end='\r', flush=True)
 
-        daily_df = pd.read_csv(days_path, index_col=None, dtype=dtypes, engine='c', low_memory=True)#.fillna(0) # dtype=dtypes,
+        daily_df = pd.read_csv(days_path, index_col=None, dtype=dtypes, engine='c')#.fillna(0) # dtype=dtypes, , low_memory=True
         
         max_day = len(daily_df)-prediction_days-lookback_days #offset from the end of the rows such that there is still enough day data points for both lookahead
         for first_day in range(lookback_days, max_day, lookback_days // lookback_days): #first day is actually the first row and we look forward to the current day + look ahead days for prediction
@@ -135,13 +146,13 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
     del run_csv_count,  daily_df, days, prediction_day_candles
 
     # # Train-test split
-    print('Splitting data into train and test sets...')
+    dprint('Splitting data into train and test sets...')
     test_size = config.get('test_size', 0.1)
     (X_daily_train, X_daily_test, 
     y_train, y_test) = train_test_split(X_daily, y, test_size=test_size)
     # y_train, y_test) = train_test_split(X_daily, X_weekly, y, test_size=test_size)
 
-    # print config
+    # dprint config
     config = config | {
         # 'daily dtype':str(X_daily.dtype), 
         # 'weekly dtype':str(X_weekly.dtype), 
@@ -169,11 +180,11 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
 
     # make and train model
     if config.get('model_path'):
-        print('Loading model from last run...')
+        dprint('Loading model from last run...')
         model = load_model(config['model_path'])
-        print('Model loaded')
+        dprint('Model loaded')
     else:
-        print('Building model...')
+        dprint('Building model...')
 
         # Model architecture
         daily_input = Input(shape=(lookback_days, feature_count)) #the input the LSTM will receive a squence of 21 days, each a vector of 13 features
@@ -207,7 +218,7 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
             # layer = Dense(rnn_units, activation='relu')(layer)
             dense_units = max(1, last_lstm_units // 2)
             layer = Dense(dense_units, activation='leaky_relu')(layer)
-        if rnn_units > 64:
+        elif rnn_units > 64:
             layer = Dense(64, activation='leaky_relu')(layer)
         layer = Dense(prediction_days * len(pred_cols))(layer)
         layer = Reshape((prediction_days, len(pred_cols)))(layer)
@@ -219,12 +230,12 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
         # cleanup
         del daily_input, layer
 
-        print('Model built.')
+        dprint('Model built.')
 
     # model.summary()
 
     # Train model
-    print('Starting train...')
+    dprint('Starting train...')
     epochs = config.get('epochs', 20) if full_run else 1
     batch_size = 32
     model.fit(
@@ -240,7 +251,7 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
     # Evaluate model
     metrics = model.evaluate([X_daily_test], y_test)
     # metrics = model.evaluate([X_daily_test, X_weekly_test], y_test)
-    print(f'Test metrics: {metrics}')
+    dprint(f'Test metrics: {metrics}')
 
     # Predict and calculate additional metrics
     y_pred = model.predict([X_daily_test])
@@ -254,14 +265,14 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
     mae = mean_absolute_error(y_test_flat, y_pred_flat)
     rmse = np.sqrt(mean_squared_error(y_test_flat, y_pred_flat))
 
-    print(f'Mean Absolute Error: {mae}')
-    print(f'Root Mean Squared Error: {rmse}')
+    dprint(f'Mean Absolute Error: {mae}')
+    dprint(f'Root Mean Squared Error: {rmse}')
 
     del X_daily_train, X_daily_test, y_train, y_test
 
     # Save the config and model summary to a JSON file
     if config.get('save', True):
-        print('Saving model...')
+        dprint('Saving model...')
         config['metrics'] = {
             'loss': metrics[0],
             'accuracy': metrics[1],
@@ -288,7 +299,7 @@ for run_csvs_start in range(csvs_start, csvs_total_len-1, csvs_per_run):
         rnn_type = 'lstm' if 'lstm' in layer_info else 'gru'
         rnn_units = layer_info['lstm']['units'] if rnn_type == 'lstm' else layer_info['gru']['units']
 
-        path = f'./models/{rnn_type}_loss{round(config["metrics"]["loss"], 3)}_a{round(config["metrics"]["accuracy"], 3)}_rmse{round(rmse, 3)}_u{rnn_units}_e{epochs}_csvs{csvs_total_len}_d{lookback_days}_w{lookback_weeks}_c{prediction_days}' + ('_norm' if normalize else '') #_m{lookback_months}
+        path = f'./models/{rnn_type}_loss{round(config["metrics"]["loss"], 3)}_a{round(config["metrics"]["accuracy"], 3)}_rmse{round(rmse, 3)}_u{rnn_units}_e{epochs}_csvs{csvs_total_len}_d{lookback_days}_c{prediction_days}' + ('_norm' if normalize else '') #_w{lookback_weeks}_m{lookback_months}
         model_path = f'{path}.keras'
         config['model_path'] = model_path
         with open(f'{path}.json', 'w') as f:
